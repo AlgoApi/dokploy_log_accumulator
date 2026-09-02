@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+node_modules/
+frontend/dist/
+backend/app/static/assets/
+backend/app/static/index.html
+backend/app/static/favicon.ico
+.DS_Store
