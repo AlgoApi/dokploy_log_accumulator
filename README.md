@@ -91,26 +91,21 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))"
    - **Load projects** → выберите проект → **Sync list from project**.
    - Включите нужные сервисы, **Save enabled services**.
    - В **Skip this application ID** укажите `applicationId` самого аккумулятора, чтобы не опрашивать себя.
-4. **Save settings**, затем **Poll now** (или подождите фоновый интервал, по умолчанию 60 с).
+4. **Save settings** и **Save enabled services** — стримы поднимаются автоматически.
 
-Клики по строке лога и по сервису открывают соответствующую страницу в Dokploy (`?tab=logs`).
+Клики по строке лога открывают страницу сервиса в Dokploy (`?tab=logs`).
 
-### Если контейнер не стартует
+### Как собираются логи (Dokploy 0.28.x)
 
-- MariaDB ещё не готова: приложение ретраит коннект при старте; если БД так и не поднялась — смотрите логи Application.
-- `DATABASE_URL`: неверный host/user/password или сервис не в той сети.
-- Нет `APP_PASSWORD` / `SESSION_SECRET` / `ENCRYPTION_KEY` — процесс сразу завершится.
-- UI 404 при живом API: билд фронта не попал в образ (должен быть `npm run build` в Dockerfile).
+REST `*.readLogs` **не используется**. Для каждого контейнера держится постоянный WebSocket
+`/docker-container-logs` с `x-api-key` (как UI Dokploy):
 
-### `application.readLogs` → 404 Not found
+- при первом подключении: `tail` + `since` из настроек (рекомендуется `since=all`, `tail=300`);
+- дальше `docker logs --follow` — новые строки без пропусков между «опросами»;
+- при обрыве WS: reconnect с `since` от времени последней записи в БД + overlap `tail` (дедуп по hash);
+- раз в **Discovery interval** — пересбор списка контейнеров (redeploy).
 
-Эндпоинт `*.readLogs` есть не во всех версиях Dokploy. Если `application.one` с тем же id даёт 200, клиент сам уходит на запасной путь:
-
-1. `application.one` / `compose.one` → `appName`, `serverId`
-2. `docker.getContainersByAppNameMatch` → `containerId`
-3. WebSocket ` /docker-container-logs` с заголовком `x-api-key` (как UI Dokploy, но без cookie)
-
-Нужен ключ owner/admin с доступом к Docker. После обновления кода сделайте redeploy аккумулятора.
+Нужен API key owner/admin с доступом к Docker (`service`/`docker` read).
 
 ## Локальная разработка
 

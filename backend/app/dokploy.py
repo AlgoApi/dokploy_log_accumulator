@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from typing import Any
 from urllib.parse import quote, urlencode, urljoin
 
 import httpx
-from websocket import WebSocketTimeoutException, create_connection
 
 TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 logger = logging.getLogger(__name__)
@@ -202,158 +200,6 @@ class DokployClient:
         if not isinstance(data, list):
             raise DokployError("Unexpected docker.getContainersByAppNameMatch response")
         return data
-
-    def application_read_logs(
-        self, application_id: str, tail: int, since: str
-    ) -> str:
-        params = {
-            "applicationId": application_id,
-            "tail": tail,
-            "since": since,
-        }
-        try:
-            data = self.query("application.readLogs", params)
-            return data if isinstance(data, str) else str(data or "")
-        except DokployError as exc:
-            if not _missing_read_logs(exc):
-                raise
-            logger.info("application.readLogs missing, falling back to WebSocket logs")
-            return self._application_logs_via_ws(application_id, tail, since)
-
-    def compose_read_logs(
-        self, compose_id: str, container_id: str, tail: int, since: str
-    ) -> str:
-        params = {
-            "composeId": compose_id,
-            "containerId": container_id,
-            "tail": tail,
-            "since": since,
-        }
-        try:
-            data = self.query("compose.readLogs", params)
-            return data if isinstance(data, str) else str(data or "")
-        except DokployError as exc:
-            if not _missing_read_logs(exc):
-                raise
-            logger.info("compose.readLogs missing, falling back to WebSocket logs")
-            details = self.compose_one(compose_id)
-            server_id = _optional_id(details.get("serverId"))
-            run_type = "swarm" if details.get("composeType") == "stack" else "native"
-            return self.stream_container_logs(
-                container_id,
-                tail,
-                since,
-                server_id=server_id,
-                run_type=run_type,
-                service_id=compose_id,
-            )
-
-    def _application_logs_via_ws(self, application_id: str, tail: int, since: str) -> str:
-        details = self.application_one(application_id)
-        app_name = details.get("appName") or ""
-        server_id = _optional_id(details.get("serverId"))
-        if not app_name:
-            raise DokployError(f"application.one returned no appName for {application_id}")
-        containers = self.containers_by_app_name(app_name, server_id=server_id)
-        if not containers:
-            return self.stream_container_logs(
-                app_name,
-                tail,
-                since,
-                server_id=server_id,
-                run_type="swarm",
-                service_id=application_id,
-            )
-        chunks: list[str] = []
-        for container in containers:
-            cid = container.get("containerId") or container.get("id") or ""
-            if not cid:
-                continue
-            chunks.append(
-                self.stream_container_logs(
-                    cid,
-                    tail,
-                    since,
-                    server_id=server_id,
-                    run_type="native",
-                    service_id=application_id,
-                )
-            )
-        return "\n".join(chunks)
-
-    def stream_container_logs(
-        self,
-        container_id: str,
-        tail: int,
-        since: str,
-        *,
-        server_id: str | None = None,
-        run_type: str = "native",
-        service_id: str | None = None,
-        idle_sec: float = 1.5,
-        max_sec: float = 8.0,
-    ) -> str:
-        http = self.base_url.rstrip("/")
-        ws_base = http.replace("https://", "wss://").replace("http://", "ws://")
-        query = {
-            "containerId": container_id,
-            "tail": str(tail),
-            "since": since or "all",
-            "runType": run_type,
-        }
-        if server_id:
-            query["serverId"] = server_id
-        if service_id:
-            query["serviceId"] = service_id
-        url = f"{ws_base}/docker-container-logs?{urlencode(query, quote_via=quote)}"
-        chunks: list[str] = []
-        ws = None
-        try:
-            ws = create_connection(
-                url,
-                header=[f"x-api-key: {self.api_key}"],
-                timeout=max_sec,
-            )
-            ws.settimeout(idle_sec)
-            deadline = time.time() + max_sec
-            idle_rounds = 0
-            while time.time() < deadline:
-                try:
-                    message = ws.recv()
-                except WebSocketTimeoutException:
-                    idle_rounds += 1
-                    if chunks or idle_rounds >= 2:
-                        break
-                    continue
-                if not message:
-                    break
-                if isinstance(message, bytes):
-                    message = message.decode("utf-8", "replace")
-                if message.startswith("This feature is not available"):
-                    raise DokployError(message)
-                chunks.append(message)
-                idle_rounds = 0
-        except DokployError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            raise DokployError(
-                f"WebSocket docker-container-logs failed for {container_id}: {exc}"
-            ) from exc
-        finally:
-            if ws is not None:
-                try:
-                    ws.close()
-                except Exception:  # noqa: BLE001
-                    pass
-        return "".join(chunks)
-
-
-def _missing_read_logs(exc: DokployError) -> bool:
-    text = str(exc)
-    return any(
-        token in text
-        for token in ("404", "NOT_FOUND", "Not found", "No procedure")
-    )
 
 
 def _optional_id(value: Any) -> str | None:

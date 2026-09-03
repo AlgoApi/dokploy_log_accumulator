@@ -17,7 +17,7 @@ const emptyForm = {
   dokploy_api_key: "",
   project_id: "",
   poll_interval_sec: 60,
-  log_since: "2m",
+  log_since: "all",
   log_tail: 300,
   level_filter: "warning_error",
   exclude_patterns: "",
@@ -161,7 +161,7 @@ export default function Settings() {
     setError("");
     try {
       const result = await api("/api/poll/now", { method: "POST" });
-      setOk(`Poll finished: ${result.polled || 0} ok, ${result.failed || 0} failed`);
+      setOk(`Streams: ${result.streams ?? 0} active`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -222,10 +222,14 @@ export default function Settings() {
       </div>
 
       <div className="panel form-grid">
-        <h2>Polling</h2>
+        <h2>Log streams</h2>
+        <p className="muted">
+          Persistent WebSocket to Dokploy (like the dashboard). New lines are ingested live; on reconnect
+          gap-fill uses last stored log time. Container discovery runs every interval below.
+        </p>
         <div className="row">
           <label>
-            Interval (sec)
+            Discovery interval (sec)
             <input
               type="number"
               value={form.poll_interval_sec}
@@ -233,14 +237,14 @@ export default function Settings() {
             />
           </label>
           <label>
-            since
+            Initial since (first connect: all or 5m)
             <input
               value={form.log_since}
               onChange={(e) => patch({ log_since: e.target.value })}
             />
           </label>
           <label>
-            tail
+            Initial tail
             <input
               type="number"
               value={form.log_tail}
@@ -304,7 +308,7 @@ export default function Settings() {
             Save settings
           </button>
           <button className="secondary" onClick={pollNow} disabled={busy}>
-            Poll now
+            Refresh streams
           </button>
         </div>
       </div>

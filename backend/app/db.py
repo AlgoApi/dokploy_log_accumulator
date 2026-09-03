@@ -48,7 +48,7 @@ class Settings(Base):
     dokploy_api_key_enc: Mapped[str] = mapped_column(Text, default="")
     project_id: Mapped[str] = mapped_column(String(128), default="")
     poll_interval_sec: Mapped[int] = mapped_column(Integer, default=60)
-    log_since: Mapped[str] = mapped_column(String(32), default="2m")
+    log_since: Mapped[str] = mapped_column(String(32), default="all")
     log_tail: Mapped[int] = mapped_column(Integer, default=300)
     level_filter: Mapped[str] = mapped_column(String(32), default="warning_error")
     exclude_patterns: Mapped[list] = mapped_column(JSON, default=list)

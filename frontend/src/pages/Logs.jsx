@@ -91,7 +91,7 @@ export default function Logs() {
             {logs.length === 0 ? (
               <tr>
                 <td colSpan="4" className="muted">
-                  No log lines yet. Enable services in Settings and wait for the next poll.
+                  No log lines yet. Enable services in Settings — logs arrive via live WebSocket streams.
                 </td>
               </tr>
             ) : (

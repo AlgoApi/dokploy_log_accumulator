@@ -19,6 +19,7 @@ from app.config import APP_PASSWORD, SESSION_SECRET, SESSION_SECURE
 from app.crypto import decrypt_secret, encrypt_secret
 from app.db import LogLine, Service, SessionLocal, get_settings, init_db, wait_for_db
 from app.dokploy import DokployClient, DokployError, flatten_projects, list_project_services
+from app.log_streams import get_stream_manager
 from app.poller import run_poll_cycle
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -31,33 +32,10 @@ STATIC_DIR = Path(__file__).parent / "static"
 async def lifespan(app: FastAPI):
     await asyncio.to_thread(wait_for_db)
     await asyncio.to_thread(init_db)
-    stop = asyncio.Event()
-
-    async def loop():
-        while not stop.is_set():
-            try:
-                await asyncio.to_thread(run_poll_cycle)
-            except Exception:
-                logger.exception("Background poll failed")
-            interval = 60
-            try:
-                with SessionLocal() as session:
-                    interval = max(15, get_settings(session).poll_interval_sec or 60)
-            except Exception:
-                logger.exception("Could not read poll interval")
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=interval)
-            except TimeoutError:
-                pass
-
-    task = asyncio.create_task(loop())
+    manager = get_stream_manager()
+    await asyncio.to_thread(manager.start)
     yield
-    stop.set()
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    await asyncio.to_thread(manager.stop)
 
 
 app = FastAPI(title="Log Accumulator", lifespan=lifespan)
@@ -199,6 +177,7 @@ def update_settings(body: SettingsUpdate, _: None = Depends(require_auth)):
             setattr(settings, field, value)
         session.commit()
         session.refresh(settings)
+        get_stream_manager().sync_now()
         return _settings_public(settings)
 
 
@@ -273,6 +252,7 @@ def patch_services(body: ServicesPatchBody, _: None = Depends(require_auth)):
         for row in rows:
             row.enabled = ids[row.id]
         session.commit()
+        get_stream_manager().sync_now()
         return {"ok": True}
 
 
@@ -315,10 +295,7 @@ def list_logs(
 
 @app.post("/api/poll/now")
 def poll_now(_: None = Depends(require_auth)):
-    result = run_poll_cycle()
-    if result.get("status") == "busy":
-        raise HTTPException(status_code=409, detail="Poll already running")
-    return result
+    return run_poll_cycle()
 
 
 assets_dir = STATIC_DIR / "assets"
